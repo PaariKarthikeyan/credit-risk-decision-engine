@@ -5,3 +5,5 @@ xgboost
 streamlit
 shap
 matplotlib
+seaborn
+joblib
