@@ -3,7 +3,7 @@ data/
 models/
 *.pkl
 *.zip
-*.csv
+*.csv.gz
 
 # Python Cache
 __pycache__/
