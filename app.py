@@ -63,7 +63,6 @@ def build_input_row():
     grade_map = {'A':1,'B':2,'C':3,'D':4,'E':5,'F':6,'G':7}
     base = {n: 0.0 for n in FEATURE_NAMES}
 
-    # Numeric features
     base.update({
         'loan_amnt':             loan_amnt,
         'funded_amnt':           loan_amnt,
@@ -101,17 +100,14 @@ def build_input_row():
         'sub_grade':             (grade_map[grade] - 1) * 5 + 2,
     })
 
-    # One-hot: purpose
     purpose_col = f'purpose_{purpose}'
     if purpose_col in base:
         base[purpose_col] = 1
 
-    # One-hot: home_ownership
     ho_col = f'home_ownership_{home_ownership}'
     if ho_col in base:
         base[ho_col] = 1
 
-    # One-hot: verification_status
     vs_col = f'verification_status_{verification.replace(" ", "_")}'
     if vs_col in base:
         base[vs_col] = 1
@@ -128,14 +124,14 @@ st.divider()
 
 col_btn, col_gap = st.columns([1, 4])
 with col_btn:
-    run = st.button("⚡ Score Applicant", type="primary", use_container_width=True)
+    run = st.button("⚡ Score Applicant", type="primary", width="stretch")
 
 if run:
     input_df = build_input_row()
     proba    = float(model.predict_proba(input_df)[0, 1])
     decision = proba >= THRESHOLD
 
-        # ── Decision banner ───────────────────────────────────────────────────────
+    # ── Decision banner ───────────────────────────────────────────────────────
     st.divider()
 
     if decision:
@@ -152,7 +148,6 @@ if run:
     else:
         st.success("## ✅  LOAN APPLICATION APPROVED", icon="✅")
 
-        # Compute expected interest revenue
         monthly_rate = int_rate / 1200
         monthly_pay  = loan_amnt * monthly_rate / (1 - (1 + monthly_rate) ** -term)
         total_pay    = monthly_pay * term
@@ -182,19 +177,27 @@ if run:
     m3.metric("Risk Score",           f"{proba * 100:.1f} / 100")
     m4.metric("Loan-to-Income Ratio", f"{loan_amnt/annual_inc:.2f}")
 
-    # ── SHAP waterfall ────────────────────────────────────────────────────────
+    # ── SHAP Explanation (Expander Controlled to prevent vanishing app) ───────
     st.divider()
-    st.subheader("🔍 Why this decision?")
-    st.caption("SHAP waterfall — positive values push towards default, negative values push towards approval.")
-
-    shap_vals = explainer(input_df)
-    fig, ax   = plt.subplots(figsize=(10, 6))
-    shap.plots.waterfall(shap_vals[0], max_display=15, show=False)
-    plt.tight_layout()
-    st.pyplot(fig)
-    plt.close()
-
-        # ══════════════════════════════════════════════════════════════════════════
+    
+    with st.expander("🔎 Explain Decision (SHAP Waterfall)"):
+        st.caption("SHAP waterfall — positive values push towards default, negative values push towards approval.")
+        shap_vals = explainer(build_input_row())
+        
+        # FIX 1: Slightly reduce the raw figure size (from 10,6 down to 8,5)
+        fig, ax = plt.subplots(figsize=(8, 5))
+        
+        # (Optional) Drop max_display to 12 so the chart isn't too tall vertically
+        shap.plots.waterfall(shap_vals[0], max_display=12, show=False) 
+        plt.tight_layout()
+        
+        # FIX 2: Box the chart into a middle column so it doesn't stretch 
+        col1, col2, col3 = st.columns([1, 2, 1])
+        with col2:
+            st.pyplot(fig)
+            
+        plt.close()
+    # ══════════════════════════════════════════════════════════════════════════
     # ── Analytics & Visualisation Section ────────────────────────────────────
     # ══════════════════════════════════════════════════════════════════════════
     st.divider()
@@ -210,48 +213,57 @@ if run:
 
     # ── Tab 1: Risk Gauge ─────────────────────────────────────────────────────
     with tab1:
-
         fig_gauge = go.Figure(go.Indicator(
-            mode  = "gauge+number+delta",
-            value = proba * 100,
-            delta = {'reference': THRESHOLD * 100, 'increasing': {'color': '#e05c5c'}, 'decreasing': {'color': '#4f98a3'}},
-            title = {'text': "Default Risk Score", 'font': {'size': 18, 'color': '#cdccca'}},
-            number= {'suffix': '%', 'font': {'size': 36, 'color': '#cdccca'}},
-            gauge = {
-                'axis': {'range': [0, 100], 'tickwidth': 1, 'tickcolor': '#393836'},
-                'bar':  {'color': '#e05c5c' if decision else '#4f98a3'},
+            mode="gauge",
+            value=proba * 100,
+            domain={'x': [0, 1], 'y': [0, 1]},
+            gauge={
+                'axis': {'range': [0, 100]},
+                'bar': {'color': '#e05c5c' if decision else '#4f98a3'},
                 'bgcolor': '#1c1b19',
-                'borderwidth': 0,
                 'steps': [
-                    {'range': [0, 15],            'color': '#1a3a2e'},
-                    {'range': [15, THRESHOLD*100],'color': '#1e3838'},
-                    {'range': [THRESHOLD*100, 50],'color': '#3a2020'},
-                    {'range': [50, 100],           'color': '#3a1818'},
+                    {'range': [0, 15], 'color': '#1a3a2e'},
+                    {'range': [15, THRESHOLD*100], 'color': '#1e3838'},
+                    {'range': [THRESHOLD*100, 50], 'color': '#3a2020'},
+                    {'range': [50, 100], 'color': '#3a1818'},
                 ],
                 'threshold': {
-                    'line': {'color': '#fdab43', 'width': 3},
-                    'thickness': 0.85,
+                    'line': {'color': '#fdab43', 'width': 4},
                     'value': THRESHOLD * 100,
                 }
             }
         ))
+
         fig_gauge.update_layout(
-            paper_bgcolor='#171614', plot_bgcolor='#171614',
-            font={'color': '#cdccca'}, height=320,
-            margin=dict(l=30, r=30, t=60, b=20),
-            annotations=[dict(
-                text=f"Threshold: {THRESHOLD:.1%}",
-                x=0.5, y=0.12, xref='paper', yref='paper',
-                showarrow=False, font=dict(color='#fdab43', size=13)
-            )]
+            paper_bgcolor='#171614',
+            height=260,
+            margin=dict(l=10, r=10, t=7, b=0)
         )
-        st.plotly_chart(fig_gauge, use_container_width=True)
+
+        st.plotly_chart(fig_gauge, width="stretch")
+        
+        st.markdown(
+            f"""
+            <div style='text-align:center; margin-top:-140px;'>
+                <div style='font-size:40px; color:#cdccca;'>{proba*100:.1f}%</div>
+                <div style='color:#4f98a3;'>▼ {(proba-THRESHOLD)*100:.1f}</div>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+        st.markdown(
+            "<h3 style='text-align:center; color:#cdccca;'>Default Risk Score</h3>",
+            unsafe_allow_html=True
+        )
+
+        st.markdown(
+            f"<div style='text-align:center; color:#fdab43;'>Threshold: {THRESHOLD:.1%}</div>",
+            unsafe_allow_html=True
+        )
         st.caption("🟡 Orange line = bank's approval threshold. Green zone = safe. Red zone = reject.")
 
     # ── Tab 2: Feature Radar ──────────────────────────────────────────────────
     with tab2:
-
-        # Normalise 6 key applicant features to 0–1 for radar
         def normalise(val, lo, hi):
             return max(0, min(1, (val - lo) / (hi - lo)))
 
@@ -260,12 +272,12 @@ if run:
         applicant_vals = [
             normalise(fico_avg,    580, 850),
             normalise(annual_inc,  10000, 200000),
-            1 - normalise(dti,     0,  40),        # inverted — lower is better
-            1 - normalise(revol_util, 0, 100),     # inverted
+            1 - normalise(dti,     0,  40),        
+            1 - normalise(revol_util, 0, 100),     
             normalise(emp_length,  0,  10),
             normalise(credit_hist, 6, 360),
         ]
-        # "ideal" borrower benchmark
+        
         ideal_vals = [1.0, 0.9, 0.85, 0.9, 0.8, 0.85]
 
         fig_radar = go.Figure()
@@ -295,18 +307,16 @@ if run:
             legend=dict(bgcolor='#1c1b19', bordercolor='#393836', borderwidth=1,
                         font=dict(color='#cdccca')),
         )
-        st.plotly_chart(fig_radar, use_container_width=True)
+        st.plotly_chart(fig_radar, width="stretch")
         st.caption("Teal = applicant profile. Orange dashed = ideal prime borrower benchmark.")
 
     # ── Tab 3: Precision-Recall / Threshold Curve ─────────────────────────────
     with tab3:
         import numpy as np
 
-        # Simulate a realistic PR curve from stored metrics
         roc  = metrics['roc_auc']
         thresholds_x = np.linspace(0.05, 0.60, 80)
 
-        # Approximate precision/recall shapes typical for this dataset
         recall_curve    = 1 / (1 + np.exp(12 * (thresholds_x - 0.30)))
         precision_curve = 0.35 + 0.55 * (1 - 1 / (1 + np.exp(-10 * (thresholds_x - 0.22))))
         revenue_curve   = precision_curve * recall_curve * (1 - thresholds_x)
@@ -340,13 +350,11 @@ if run:
             legend=dict(bgcolor='#1c1b19', bordercolor='#393836', borderwidth=1,
                         font=dict(color='#cdccca')),
         )
-        st.plotly_chart(fig_thresh, use_container_width=True)
+        st.plotly_chart(fig_thresh, width="stretch")
         st.caption("White dashed = bank threshold. Blue/red dot = this applicant's probability.")
 
     # ── Tab 4: Top Feature Importance Bar ─────────────────────────────────────
     with tab4:
-
-        # Use SHAP values from this prediction for feature importance
         sv       = shap_vals.values[0]
         feat_imp = list(zip(FEATURE_NAMES, sv))
         feat_imp.sort(key=lambda x: abs(x[1]), reverse=True)
@@ -374,13 +382,17 @@ if run:
             title=dict(text='Top 15 Features — This Applicant',
                        font=dict(color='#cdccca', size=14)),
         )
-        st.plotly_chart(fig_bar, use_container_width=True)
+        st.plotly_chart(fig_bar, width="stretch")
         st.caption("🔴 Red bars push towards default. 🔵 Teal bars push towards repayment.")
 
 else:
     # Placeholder state
-    st.info("👈 Adjust applicant details in the sidebar, then click **⚡ Score Applicant**.",
-            icon="ℹ️")
-    st.image("outputs/shap_summary.png",
-             caption="Feature importance across the full training set",
-             use_container_width=True)
+    st.info("👈 Adjust applicant details in the sidebar, then click **⚡ Score Applicant**.", icon="ℹ️")
+    
+    st.write("") 
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col2:
+        # Note: st.image uses use_container_width=True, the 'width="stretch"' warning is just for buttons and charts!
+        st.image("outputs/shap_summary.png",
+                 caption="Feature importance across the full training set",
+                 use_container_width=True)
